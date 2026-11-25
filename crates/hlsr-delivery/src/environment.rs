@@ -17,6 +17,8 @@ enum Variables {
 pub struct Environment {
     variables: Variables,
     production: bool,
+    /// HLSR-CE: встроенный канал загрузок включён и в отладочной сборке (`cargo run`).
+    builtin_channel: bool,
 }
 
 impl Environment {
@@ -25,6 +27,8 @@ impl Environment {
         Environment {
             variables: Variables::Process,
             production: is_production_build(),
+            // HLSR-CE: игры качаются из канала в любой сборке, не только в сборке выпуска.
+            builtin_channel: true,
         }
     }
 
@@ -44,11 +48,18 @@ impl Environment {
                     .collect(),
             ),
             production,
+            builtin_channel: production,
         }
     }
 
     pub fn is_production(&self) -> bool {
         self.production
+    }
+
+    /// HLSR-CE: встроенный канал загрузок включён — в production и в окружении процесса
+    /// ([`Environment::process`]) любой сборки; в заданном наборе — как production.
+    pub fn builtin_channel_enabled(&self) -> bool {
+        self.production || self.builtin_channel
     }
 
     /// Значение переменной; не заданной — `None`. Не UTF-8 в переменных процесса не читается.

@@ -87,7 +87,7 @@ pub fn qa_url_kind(url: &str, env: &Environment) -> Option<QaUrlKind> {
 
 /// `hasActiveReleaseProfile()`: в production есть игра со встроенным каналом и ключом.
 pub fn has_active_release_profile(env: &Environment) -> bool {
-    env.is_production()
+    env.builtin_channel_enabled()
         && GAME_IDS.iter().any(|game_id| {
             builtin_channel(game_id).is_some_and(|base| {
                 base.release_profile_enabled && !base.url.is_empty() && !base.public_keys.is_empty()
@@ -130,7 +130,7 @@ pub fn resolve(game_id: &str, env: &Environment) -> Option<ChannelConfig> {
 
     let builtin_active = !base.url.is_empty()
         && base.release_profile_enabled
-        && env.is_production()
+        && env.builtin_channel_enabled()
         && !base.public_keys.is_empty();
 
     let mut config = ChannelConfig {
