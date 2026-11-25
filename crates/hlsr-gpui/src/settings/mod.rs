@@ -23,13 +23,14 @@ use crate::theme::Theme;
 use gpui::{App, AppContext, Context, Entity, IntoElement, Render, Subscription, Task, Window};
 use hlsr_core::js::truthy;
 use hlsr_core::language::Language;
+use hlsr_ui::controllers::custom_mods::{ModsView, Note, note_for};
 use hlsr_ui::controllers::settings::{
     self as logic, DiagCheck, DiscordRpc, Draft, ProtonStatus, Section,
 };
 use hlsr_ui::controllers::shell_flows::ShellFlows;
 use hlsr_ui::services::{ServiceEvent, Services, StoreRead};
 use serde_json::{Map, Value, json};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::time::Instant;
 
 /// Ключи prefs, которые окно не пишет: `ruleCategory`/`keyboardFull` пишут свои функции
@@ -68,6 +69,10 @@ pub(super) struct State {
     export_busy: bool,
     export_opening: bool,
     crash_dump: bool,
+    /// HLSR-CE: «Свои моды» — снимок, идёт действие, заметка последнего действия.
+    mods: ModsView,
+    mods_busy: bool,
+    mods_note: Option<Note>,
 }
 
 impl State {
@@ -99,6 +104,9 @@ impl State {
             export_busy: false,
             export_opening: false,
             crash_dump: false,
+            mods: ModsView::default(),
+            mods_busy: false,
+            mods_note: None,
         }
     }
 
@@ -126,6 +134,8 @@ pub struct SettingsModal {
     path: Option<Entity<TextInput>>,
     scrolls: Vec<Scroll>,
     _path_events: Option<Subscription>,
+    /// HLSR-CE: поля параметров запуска модов (по id мода) и их подписки.
+    mod_args: HashMap<String, (Entity<TextInput>, Subscription)>,
     _events: Task<()>,
 }
 
@@ -143,6 +153,7 @@ impl SettingsModal {
             path: None,
             scrolls: Vec::new(),
             _path_events: None,
+            mod_args: HashMap::new(),
             _events: events,
         }
     }
@@ -225,6 +236,9 @@ impl SettingsModal {
             self.refresh_protons(cx);
         }
         self.load_discord_rpc(cx);
+        if !self.state.linux {
+            self.load_mods(cx);
+        }
     }
 
     /// `$emit("close")` → `closeSettings`.
@@ -334,6 +348,9 @@ impl SettingsModal {
         self.state.section = index;
         if self.state.section_id() == "proton" {
             self.refresh_protons(cx);
+        }
+        if self.state.section_id() == "mods" {
+            self.load_mods(cx);
         }
         cx.notify();
     }
@@ -891,6 +908,81 @@ impl SettingsModal {
         cx.notify();
     }
 
+    // ---- HLSR-CE: «Свои моды» ------------------------------------------------------------------
+
+    fn load_mods(&mut self, cx: &mut Context<Self>) {
+        self.ask("custom-mods-list", Vec::new(), cx, |this, reply, _| {
+            if let Some(view) = reply.ok().as_ref().and_then(ModsView::from_value) {
+                this.state.mods = view;
+            }
+        });
+    }
+
+    /// Действие с модами: ответ — новый снимок и заметка.
+    pub(super) fn mods_do(
+        &mut self,
+        channel: &'static str,
+        args: Vec<Value>,
+        cx: &mut Context<Self>,
+    ) {
+        // Выбор папки или exe ждёт диалога; остальные кнопки на это время выключены.
+        self.state.mods_busy = true;
+        self.state.mods_note = None;
+        cx.notify();
+        self.ask(channel, args, cx, move |this, reply, _| {
+            this.state.mods_busy = false;
+            match reply {
+                Ok(value) => {
+                    if let Some(view) = ModsView::from_value(&value) {
+                        this.state.mods = view;
+                    }
+                    this.state.mods_note = note_for(channel, &value);
+                }
+                Err(_) => {
+                    this.state.mods_note = note_for(channel, &json!({"ok": false}));
+                }
+            }
+        });
+    }
+
+    /// Выбор движка: пункт `__pick__` — свой exe через диалог.
+    pub(super) fn mods_set_engine(&mut self, id: &str, exe: &str, cx: &mut Context<Self>) {
+        if exe == sections::PICK_EXE {
+            self.mods_do("custom-mods-pick-exe", vec![json!(id)], cx);
+        } else {
+            self.mods_do("custom-mods-set-engine", vec![json!(id), json!(exe)], cx);
+        }
+    }
+
+    /// Поля параметров запуска: новое — для нового мода (с его параметрами), лишние — убрать.
+    fn sync_mod_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let ids: BTreeSet<&str> = self.state.mods.mods.iter().map(|m| m.id.as_str()).collect();
+        self.mod_args.retain(|id, _| ids.contains(id.as_str()));
+        let placeholder = self.state.t("#L_MODS_ARGS_PLACEHOLDER");
+        for entry in &self.state.mods.mods {
+            if self.mod_args.contains_key(&entry.id) {
+                continue;
+            }
+            let args = entry.args.clone();
+            let placeholder = placeholder.clone();
+            let input = cx.new(|cx| {
+                TextInput::new(window, cx)
+                    .style(sections::args_style)
+                    .placeholder(placeholder)
+                    .max_length(1024)
+                    .with_text(args)
+            });
+            let id = entry.id.clone();
+            let events = cx.subscribe(&input, move |this, input, event, cx| {
+                if *event == FieldEvent::Change {
+                    let text = input.read(cx).value();
+                    this.mods_do("custom-mods-set-args", vec![json!(id), json!(text)], cx);
+                }
+            });
+            self.mod_args.insert(entry.id.clone(), (input, events));
+        }
+    }
+
     pub(super) fn open_logs(&mut self, cx: &mut Context<Self>) {
         self.fire("open-logs-folder", Vec::new(), cx);
     }
@@ -977,6 +1069,9 @@ impl Render for SettingsModal {
         let (open, _) = Self::wanted(cx);
         if open != self.modal.is_open() {
             cx.defer_in(window, Self::sync);
+        }
+        if !self.state.linux {
+            self.sync_mod_inputs(window, cx);
         }
         self.frame(window, cx)
     }

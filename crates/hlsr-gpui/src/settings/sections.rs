@@ -5,7 +5,7 @@
 //! `.settings-select`, путь `.settings-path`, кнопки `.settings-btn` (как у «Персонализации»).
 
 use super::{SettingsModal, State, themes};
-use crate::configs::footer::{BtnLook, settings_btn};
+use crate::configs::footer::{BtnLook, icon_label, settings_btn};
 use crate::icons::{chevron, fa_glyph, icon, svg_icon};
 use crate::kit::button::{focus_handle, focus_visible, outline, white};
 use crate::kit::input::FieldStyle;
@@ -26,9 +26,12 @@ use gpui::{
     Role, SharedString, WeakEntity, Window, div, img, prelude::*, px, rgb,
 };
 use hlsr_ui::controllers::settings as logic;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 const ERROR: u32 = 0xff6b78;
+/// HLSR-CE: пункт «Свой exe…» в списке движков мода.
+pub(super) const PICK_EXE: &str = "__pick__";
 
 /// Снимок окна для разделов (раздел, который уходит, рисуется из того же снимка).
 pub(super) struct Snap {
@@ -36,6 +39,8 @@ pub(super) struct Snap {
     pub(super) theme: Theme,
     pub(super) weak: WeakEntity<SettingsModal>,
     pub(super) path: Option<Entity<TextInput>>,
+    /// HLSR-CE: поля параметров запуска модов (по id мода).
+    pub(super) mod_args: HashMap<String, Entity<TextInput>>,
     /// Ширина окна, CSS px.
     pub(super) width: f32,
     pub(super) zoom: f32,
@@ -82,6 +87,14 @@ pub(super) fn path_style(theme: &Theme) -> FieldStyle {
     }
 }
 
+/// HLSR-CE: поле параметров запуска мода — как путь библиотеки, без места под кнопку.
+pub(super) fn args_style(theme: &Theme) -> FieldStyle {
+    FieldStyle {
+        pad_right: None,
+        ..path_style(theme)
+    }
+}
+
 impl SettingsModal {
     pub(super) fn frame(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.global::<Theme>().clone();
@@ -94,6 +107,11 @@ impl SettingsModal {
             theme: theme.clone(),
             weak: cx.weak_entity(),
             path: self.path.clone(),
+            mod_args: self
+                .mod_args
+                .iter()
+                .map(|(id, (input, _))| (id.clone(), input.clone()))
+                .collect(),
             width,
             zoom,
         });
@@ -208,6 +226,7 @@ impl SettingsModal {
                 let content = match id {
                     "general" => general(snap),
                     "downloads" => downloads(snap),
+                    "mods" => mods(snap),
                     "proton" => proton(snap),
                     "interface" => interface(snap),
                     "diagnostics" => diagnostics(snap),
@@ -734,6 +753,213 @@ fn downloads(snap: &Snap) -> Vec<AnyElement> {
             At::Last,
         ),
     ]
+}
+
+// ---- HLSR-CE: «Свои моды» -----------------------------------------------------------------------
+
+fn mods(snap: &Snap) -> Vec<AnyElement> {
+    let st = &snap.state;
+    let view = &st.mods;
+    let busy = st.mods_busy;
+    let mut out = vec![group(snap, "#L_MODS_GROUP", true)];
+
+    // Вступление, кнопки «Добавить папку» / «Найти в Steam» и заметка последнего действия.
+    let mut intro = vec![hint(snap, snap.t("#L_MODS_INTRO"))];
+    if let Some(n) = &st.mods_note {
+        let args: Vec<&str> = n.arg.as_deref().into_iter().collect();
+        let color = if n.error { ERROR } else { 0x5fd38d };
+        intro.push(note(snap.tr(n.key, &args), color));
+    }
+    let actions = div()
+        .flex()
+        .flex_none()
+        .gap(u(8.))
+        .child(crate::snap::target(
+            "settings-mods-add",
+            settings_btn("settings-mods-add", BtnLook::Plain)
+                .compact()
+                .disabled(busy)
+                .on_click(
+                    snap.on(|this, _, cx| this.mods_do("custom-mods-add-folder", Vec::new(), cx)),
+                )
+                .children(icon_label(
+                    "fas fa-folder-plus",
+                    snap.t("#L_MODS_ADD"),
+                    true,
+                )),
+        ))
+        .child(crate::snap::target(
+            "settings-mods-scan",
+            settings_btn("settings-mods-scan", BtnLook::Plain)
+                .compact()
+                .disabled(busy)
+                .on_click(snap.on(|this, _, cx| this.mods_do("custom-mods-scan", Vec::new(), cx)))
+                .children(icon_label("fab fa-steam", snap.t("#L_MODS_SCAN"), true)),
+        ))
+        .into_any_element();
+    out.push(row(intro, Some(actions), false, At::Middle));
+
+    if !view.loaded || view.mods.is_empty() {
+        let key = if view.loaded {
+            "#L_MODS_EMPTY"
+        } else {
+            "#L_MODS_LOADING"
+        };
+        out.push(row(vec![hint(snap, snap.t(key))], None, false, At::Last));
+        return out;
+    }
+
+    let count = view.mods.len();
+    for (index, entry) in view.mods.iter().enumerate() {
+        let at = if index + 1 == count {
+            At::Last
+        } else {
+            At::Middle
+        };
+        let mut texts = vec![
+            label(snap, entry.name.clone()),
+            hint(snap, entry.mod_dir.clone()),
+        ];
+        if let Some(problem) = &entry.problem {
+            texts.push(note(
+                snap.t(hlsr_ui::controllers::custom_mods::problem_key(problem)),
+                ERROR,
+            ));
+        }
+        // Движок не годится — предложить найденный (HL2 Ghosting из лаунчера, если скачан).
+        if let Some(suggested) = &entry.suggested {
+            let (id, exe) = (entry.id.clone(), suggested.exe.clone());
+            let target = format!("settings-mods-suggest-{}", entry.id);
+            texts.push(
+                div().flex().pt(u(4.)).child(crate::snap::target(
+                    target.clone(),
+                    settings_btn(SharedString::from(target), BtnLook::Primary)
+                        .compact()
+                        .disabled(busy)
+                        .on_click(snap.on(move |this, _, cx| this.mods_set_engine(&id, &exe, cx)))
+                        .children(icon_label(
+                            "fas fa-magic",
+                            snap.tr("#L_MODS_USE_ENGINE", &[&suggested.label]),
+                            true,
+                        )),
+                )),
+            );
+        }
+
+        // Движок: найденные, свои exe, «Свой exe…».
+        let engine_name = |engine: &hlsr_ui::controllers::custom_mods::EngineEntry| {
+            if engine.custom {
+                snap.tr("#L_MODS_ENGINE_CUSTOM", &[&engine.label])
+            } else {
+                engine.label.clone()
+            }
+        };
+        let mut items: Vec<Item> = view
+            .engines
+            .iter()
+            .map(|engine| {
+                let mut item = Item::new(engine.exe.clone(), engine_name(engine));
+                item.hint = Some(engine.exe.clone().into());
+                item
+            })
+            .collect();
+        let mut pick = Item::new(PICK_EXE, snap.t("#L_MODS_ENGINE_PICK"));
+        pick.separated = !items.is_empty();
+        items.push(pick);
+        let engine_text = match view.engines.iter().find(|e| e.exe == entry.exe) {
+            Some(engine) => engine_name(engine),
+            None => view
+                .engine_label(&entry.exe)
+                .map_or_else(|| snap.t("#L_MODS_ENGINE_NONE"), str::to_owned),
+        };
+        let theme = snap.theme.clone();
+        let weak = snap.weak.clone();
+        let mod_id = entry.id.clone();
+        let engine = dropdown(
+            SharedString::from(format!("settings-mods-engine-{}", entry.id)),
+            items,
+            Some(entry.exe.clone().into()),
+        )
+        .align_right()
+        .label(snap.t("#L_MODS_ENGINE"))
+        .toggle(move |state| select_toggle(&theme, None, engine_text, state))
+        .on_select(move |item, _, cx| {
+            weak.update(cx, |this, cx| this.mods_set_engine(&mod_id, &item.id, cx))
+                .ok();
+        });
+
+        let id = entry.id.clone();
+        let play = settings_btn(
+            SharedString::from(format!("settings-mods-play-{id}")),
+            BtnLook::Primary,
+        )
+        .compact()
+        .disabled(busy || entry.problem.is_some())
+        .on_click(snap.on(move |this, _, cx| {
+            this.mods_do("custom-mods-launch", vec![serde_json::json!(id)], cx)
+        }))
+        .children(icon_label("fas fa-play", snap.t("#L_MODS_PLAY"), true));
+        let id = entry.id.clone();
+        let folder = settings_btn(
+            SharedString::from(format!("settings-mods-folder-{id}")),
+            BtnLook::Ghost,
+        )
+        .compact()
+        .label(snap.t("#L_MODS_FOLDER"))
+        .on_click(snap.on(move |this, _, cx| {
+            this.mods_do("custom-mods-open-folder", vec![serde_json::json!(id)], cx)
+        }))
+        .child(fa_glyph("fas fa-folder-open", 13.5));
+        let id = entry.id.clone();
+        let remove = settings_btn(
+            SharedString::from(format!("settings-mods-remove-{id}")),
+            BtnLook::Ghost,
+        )
+        .compact()
+        .disabled(busy)
+        .label(snap.t("#L_MODS_REMOVE"))
+        .on_click(snap.on(move |this, _, cx| {
+            this.mods_do("custom-mods-remove", vec![serde_json::json!(id)], cx)
+        }))
+        .child(fa_glyph("fas fa-trash-alt", 13.5));
+
+        let field = div()
+            .flex_1()
+            .min_w_0()
+            .children(snap.mod_args.get(&entry.id).cloned());
+        let controls = div()
+            .flex()
+            .items_center()
+            .gap(u(8.))
+            .w_full()
+            .child(field)
+            .child(div().flex_none().child(engine))
+            .child(crate::snap::target(
+                format!("settings-mods-play-{}", entry.id),
+                play,
+            ))
+            .child(
+                div()
+                    .id(SharedString::from(format!(
+                        "settings-mods-folder-tip-{}",
+                        entry.id
+                    )))
+                    .tip(snap.t("#L_MODS_FOLDER"))
+                    .child(folder),
+            )
+            .child(
+                div()
+                    .id(SharedString::from(format!(
+                        "settings-mods-remove-tip-{}",
+                        entry.id
+                    )))
+                    .tip(snap.t("#L_MODS_REMOVE"))
+                    .child(remove),
+            )
+            .into_any_element();
+        out.push(row(texts, Some(controls), true, at));
+    }
+    out
 }
 
 // ---- «Proton» (Linux) ----------------------------------------------------------------------------

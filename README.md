@@ -9,6 +9,7 @@
 What CE adds on top of HLSR:
 
 - **Uncap 60 FPS** — *Settings → Interface*: the launcher interface draws at your monitor refresh rate (144, 240 Hz and up) instead of being capped at 60 frames per second.
+- **Custom Source mods** — *Mod library* in the left column: your mods as tiles, each with its own page (engine, launch options with quick checkboxes like `-windowed` and `-noborder`, Play). Add a mod folder, find everything in `steamapps/sourcemods`, or install a mod from a zip/7z archive. The engine can be Source SDK Base 2013, Half-Life 2, HL2 Ghosting downloaded by the launcher or your own `hl2.exe`; if a mod needs Episode One/Two files the engine lacks, the launcher warns you (Windows).
 - **A secret** — the launcher remembers its roots. Hint: type a certain word on the keyboard anywhere outside text fields.
 
 [![release](https://img.shields.io/github/v/release/HL-HLSR/HLSR-Releases?label=release&color=7c3aed)](https://github.com/HL-HLSR/HLSR-Releases/releases/latest)

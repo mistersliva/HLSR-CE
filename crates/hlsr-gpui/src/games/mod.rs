@@ -4,6 +4,7 @@ pub mod build_selector;
 pub mod download_bar;
 pub mod game_menu;
 pub mod hero;
+pub mod mod_page;
 pub mod modals;
 pub mod play_button;
 pub mod stats;

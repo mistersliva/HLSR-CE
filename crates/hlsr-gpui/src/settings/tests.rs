@@ -131,8 +131,8 @@ fn save_keeps_the_window_open_and_theme_applies_at_once(cx: &mut TestAppContext)
     open(cx, None);
     assert_eq!(cx.update(|_, cx| Layers::open_count(cx)), 1);
     assert_eq!(calls(&fx, "discord-rpc-get"), [json!([])]);
-    // «Интерфейс» (Windows: Общие, Загрузки, Интерфейс…): тема — сразу, без «Сохранить».
-    click(cx, "settings-tabs-2");
+    // «Интерфейс» (Windows: Общие, Загрузки, Свои моды, Интерфейс…): тема — сразу, без «Сохранить».
+    click(cx, "settings-tabs-3");
     // «Бумага» — в третьем ряду сетки, ниже края раздела.
     wheel(cx, "settings-body", 6.);
     click(cx, "theme-paper");
@@ -335,4 +335,87 @@ fn diagnostics_run_and_export_like_0_4_9(cx: &mut TestAppContext) {
         calls(&fx, "export-diagnostics-zip"),
         [json!([{"includeDump": false}])]
     );
+}
+
+/// HLSR-CE: «Свои моды» — список из `custom-mods-list`, «Играть» шлёт `custom-mods-launch`, мод
+/// с проблемой не запускается.
+#[gpui::test]
+fn custom_mods_section_lists_and_launches(cx: &mut TestAppContext) {
+    cx.update(crate::init);
+    let snapshot = json!({
+        "ok": true,
+        "mods": [
+            {"id": "m1", "name": "Entropy : Zero 2", "modDir": "C:/sourcemods/EZ2",
+             "exe": "C:/SDK/hl2.exe", "args": "-novid", "problem": null},
+            {"id": "m2", "name": "Broken", "modDir": "C:/sourcemods/X",
+             "exe": "", "args": "", "problem": "NO_ENGINE"}
+        ],
+        "engines": [{"exe": "C:/SDK/hl2.exe", "label": "Source SDK Base 2013 Singleplayer"}]
+    });
+    let fx = fixtures(base(json!({
+        "custom-mods-list": snapshot,
+        "custom-mods-launch": snapshot,
+    })));
+    let services: Services = fx.clone();
+    let (_, cx) = cx.add_window_view(|_, cx| LauncherRoot::launcher(services, cx));
+    cx.run_until_parked();
+    // Колонка списка модов не читает: его читают библиотека модов и окно настроек.
+    let at_start = calls(&fx, "custom-mods-list").len();
+    open(cx, None);
+    // И окно настроек — при открытии и на вкладке «Свои моды».
+    assert_eq!(calls(&fx, "custom-mods-list").len(), at_start + 1);
+    click(cx, "settings-tabs-2");
+    assert!(calls(&fx, "custom-mods-list").len() >= at_start + 2);
+    click(cx, "settings-mods-play-m1");
+    assert_eq!(calls(&fx, "custom-mods-launch"), [json!(["m1"])]);
+    // Без движка «Играть» выключена.
+    click(cx, "settings-mods-play-m2");
+    assert_eq!(calls(&fx, "custom-mods-launch").len(), 1);
+    assert!(settings_open(cx));
+}
+
+/// HLSR-CE: «Библиотека модов» в колонке → плитки → страница мода (щелчок не запускает); галочка
+/// параметра правит строку параметров; «Играть» — запуск.
+#[gpui::test]
+fn mod_library_tiles_open_the_mod_page(cx: &mut TestAppContext) {
+    cx.update(crate::init);
+    let snapshot = json!({
+        "ok": true,
+        "mods": [{"id": "m1", "name": "Awakening", "modDir": "C:/sourcemods/Awakening",
+                  "exe": "C:/SDK/hl2.exe", "args": "-novid -fullscreen", "problem": null,
+                  "missingEpisodes": ["ep2"]}],
+        "engines": [{"exe": "C:/SDK/hl2.exe", "label": "Source SDK Base 2013 Singleplayer"}]
+    });
+    let fx = fixtures(base(json!({
+        "custom-mods-list": snapshot,
+        "custom-mods-launch": snapshot,
+        "custom-mods-set-args": snapshot,
+    })));
+    let services: Services = fx.clone();
+    let (_, cx) = cx.add_window_view(|_, cx| LauncherRoot::launcher(services, cx));
+    cx.run_until_parked();
+    settle(cx, 10);
+    let tab = |cx: &mut VisualTestContext| {
+        cx.update(|_, cx| {
+            let nav = ShellContext::get(cx).expect("оболочка").nav.clone();
+            (nav.active_tab(), nav.selected_mod())
+        })
+    };
+    click(cx, "rail-mods");
+    assert_eq!(tab(cx), ("mods".into(), String::new()));
+    click(cx, "mods-tile-m1");
+    assert_eq!(tab(cx), ("mods".into(), "m1".into()));
+    // Щелчок только открывает страницу — мод не запускается.
+    assert!(calls(&fx, "custom-mods-launch").is_empty());
+    // «В окне» снимает «Полный экран» и сохраняется.
+    click(cx, "mod-flag-windowed");
+    assert_eq!(
+        calls(&fx, "custom-mods-set-args").last(),
+        Some(&json!(["m1", "-novid -windowed"]))
+    );
+    click(cx, "mod-play");
+    assert_eq!(calls(&fx, "custom-mods-launch"), [json!(["m1"])]);
+    // «Все моды» — назад в библиотеку.
+    click(cx, "mod-back");
+    assert_eq!(tab(cx), ("mods".into(), String::new()));
 }

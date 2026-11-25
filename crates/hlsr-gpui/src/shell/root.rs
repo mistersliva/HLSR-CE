@@ -28,6 +28,7 @@ use crate::dialogs::{
     welcome::WelcomeModal,
 };
 use crate::env::GpuiEnv;
+use crate::games::mod_page::ModPage;
 use crate::games::{
     download_bar::DownloadBar,
     hero::HeroPanel,
@@ -301,6 +302,8 @@ pub(super) struct Frame {
     pub(super) home: Option<Entity<HomePanel>>,
     pub(super) configs: Option<Entity<GameConfigsPanel>>,
     pub(super) demo: Option<Entity<DemoPanel>>,
+    /// HLSR-CE: страница своего мода (вкладка `mods`).
+    pub(super) mods: Option<Entity<ModPage>>,
     pub(super) hero: Entity<HeroPanel>,
     pub(super) tool: Entity<ToolPanel>,
     pub(super) download_bar: Entity<DownloadBar>,
@@ -344,6 +347,7 @@ impl Frame {
             home: None,
             configs: None,
             demo: None,
+            mods: None,
             hero: cx.new(|cx| HeroPanel::new(services, cx)),
             tool: cx.new(|cx| ToolPanel::new(services, cx)),
             download_bar: cx.new(|cx| DownloadBar::new(services, cx)),
@@ -371,6 +375,7 @@ impl Frame {
         .chain(self.home.as_ref().map(Entity::entity_id))
         .chain(self.configs.as_ref().map(Entity::entity_id))
         .chain(self.demo.as_ref().map(Entity::entity_id))
+        .chain(self.mods.as_ref().map(Entity::entity_id))
         .chain(self.windows.iter().map(AnyView::entity_id))
         {
             cx.notify(view);
@@ -689,6 +694,10 @@ impl ShellRoot {
     fn sync_background(&mut self, radius: Pixels, cx: &mut Context<ShellRoot>) {
         let (section, tab) = (self.nav.section(), self.nav.active_tab());
         let tool = section == "games" && tab == "tools";
+        // HLSR-CE: за страницей мода — арт Half-Life 2.
+        let mod_art = (section == "games" && tab == "mods")
+            .then(|| Selection::of_game("220"))
+            .flatten();
         let selection = (section == "games" && tab == "games")
             .then(|| {
                 let game = self.flows.current_game_id();
@@ -697,7 +706,8 @@ impl ShellRoot {
                     .and_then(|_| Selection::of_episodes(&game))
                     .or_else(|| Selection::of_game(&game))
             })
-            .flatten();
+            .flatten()
+            .or(mod_art);
         let key = (selection.as_ref().map(|s| s.hero), tool, radius);
         if self.background_key == Some(key) {
             return;
@@ -918,6 +928,14 @@ impl ShellRoot {
                     .get_or_insert_with(|| cx.new(|cx| GameConfigsPanel::new(&services, cx)))
                     .clone();
                 cell().child(cached(configs, full(), on)).into_any_element()
+            }
+            (_, "mods") => {
+                let mods = self
+                    .frame
+                    .mods
+                    .get_or_insert_with(|| cx.new(|cx| ModPage::new(&services, cx)))
+                    .clone();
+                cell().child(cached(mods, full(), on)).into_any_element()
             }
             (_, "demo") => {
                 let demo = self

@@ -12,6 +12,7 @@ pub mod cfg_history;
 pub mod config_chips;
 pub mod config_tabs;
 pub mod config_tour;
+pub mod custom_mods;
 pub mod custom_packs;
 pub mod demo_export;
 pub mod demo_panel;

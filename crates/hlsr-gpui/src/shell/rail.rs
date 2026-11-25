@@ -15,6 +15,9 @@
 //!
 //! Логика — [`NavController`] (`hlsr-ui`): данные колонки, выбор игры, инструмента, «Демо»,
 //! кнопки внизу, `toggleRail`.
+//!
+//! HLSR-CE: после «Демо» — линия и «Библиотека модов» (свои Source-моды плитками, вкладка `mods`;
+//! в Linux пункта нет).
 
 use super::root::{ShellContext, ShellRoot};
 use crate::icons::fa_glyph;
@@ -124,6 +127,8 @@ enum Action {
     Demo,
     Toggle,
     Footer(&'static str),
+    /// HLSR-CE: библиотека своих модов.
+    Mods,
 }
 
 /// Значок пункта списка.
@@ -201,6 +206,7 @@ impl GameSidebar {
             }
             Action::Toggle => nav.toggle_rail(),
             Action::Footer(id) => nav.footer_tool(id),
+            Action::Mods => nav.select_mod(""),
         }
     }
 
@@ -594,6 +600,21 @@ impl Render for GameSidebar {
             active: tab == "demo",
             action: Action::Demo,
         });
+        // HLSR-CE: «Библиотека модов» — после линии.
+        let mods_at = entries.len();
+        if !cfg!(target_os = "linux") {
+            let title = tr("#L_MODS_LIBRARY");
+            entries.push(Entry {
+                owner: "mods".into(),
+                target: "rail-mods".into(),
+                label: title.clone(),
+                tip: Tip { title, note: None },
+                icon: Icon::Glyph("fas fa-puzzle-piece".into(), 22., logo),
+                available: true,
+                active: tab == "mods",
+                action: Action::Mods,
+            });
+        }
 
         let mut focused = None;
         let mut list = div()
@@ -610,7 +631,7 @@ impl Render for GameSidebar {
             .track_scroll(&self.scroll)
             .on_scroll(cx.listener(|this, _, _, cx| this.hide_all(cx)));
         for (index, entry) in entries.into_iter().enumerate() {
-            if index == game_count {
+            if index == game_count || (index == mods_at && index > game_count) {
                 // Линия перед инструментами: всегда, и без инструментов («Демо» после неё).
                 list = list.child(rule(40., width - 2. * side, t, rule_color));
             }

@@ -38,6 +38,12 @@ const PROTON: Section = Section {
     icon: "fas fa-flask",
     title: "#L_S_PROTON",
 };
+/// HLSR-CE: свои Source-моды (Windows).
+const MODS: Section = Section {
+    id: "mods",
+    icon: "fas fa-puzzle-piece",
+    title: "#L_S_MODS",
+};
 const INTERFACE: Section = Section {
     id: "interface",
     icon: "fas fa-palette",
@@ -59,6 +65,9 @@ pub fn sections(linux: bool) -> Vec<Section> {
     let mut list = vec![GENERAL, DOWNLOADS];
     if linux {
         list.push(PROTON);
+    } else {
+        // HLSR-CE: моды запускаются как exe Windows.
+        list.push(MODS);
     }
     list.extend([INTERFACE, DIAGNOSTICS, ABOUT]);
     list
@@ -698,7 +707,14 @@ mod tests {
         let win: Vec<&str> = sections(false).iter().map(|s| s.id).collect();
         assert_eq!(
             win,
-            ["general", "downloads", "interface", "diagnostics", "about"]
+            [
+                "general",
+                "downloads",
+                "mods",
+                "interface",
+                "diagnostics",
+                "about"
+            ]
         );
         let linux: Vec<&str> = sections(true).iter().map(|s| s.id).collect();
         assert_eq!(
@@ -713,10 +729,11 @@ mod tests {
             ]
         );
         assert_eq!(initial_section(false, "data"), 0);
-        assert_eq!(initial_section(false, "diagnostics"), 3);
+        assert_eq!(initial_section(false, "diagnostics"), 4);
+        assert_eq!(initial_section(false, "mods"), 2);
         assert_eq!(initial_section(true, "diagnostics"), 4);
         assert_eq!(initial_section(true, "proton"), 2);
-        assert_eq!(initial_section(false, "proton"), 4);
+        assert_eq!(initial_section(false, "proton"), 5);
         assert_eq!(slide_direction(0, 2), "next");
         assert_eq!(slide_direction(2, 2), "next");
         assert_eq!(slide_direction(3, 1), "prev");

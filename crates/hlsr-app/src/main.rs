@@ -3,6 +3,8 @@
 // Сборка выпуска на Windows — без окна консоли, как HLSR.exe 0.4.7.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+// HLSR-CE: свои Source-моды (каналы `custom-mods-*`).
+mod custom_mods;
 mod demo;
 mod dialogs;
 // Живой инспектор окна (`HLSR_LIVE_PORT`, scripts/gpui/live.py).

@@ -2242,6 +2242,15 @@ impl ShellFlows {
         self.changed(ShellChange::Windows);
     }
 
+    /// HLSR-CE: «Свои моды» в колонке — настройки на разделе модов.
+    pub fn open_mods(&self) {
+        self.with_state(|state| {
+            state.settings_section = "mods".into();
+            state.settings_open = true;
+        });
+        self.changed(ShellChange::Windows);
+    }
+
     /// `closeSettings()`.
     pub fn close_settings(&self) {
         self.with_state(|state| {

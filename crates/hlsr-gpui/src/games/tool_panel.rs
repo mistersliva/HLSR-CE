@@ -142,7 +142,7 @@ impl ToolControls {
 
 /// Кнопка слева от действия (`.tool-panel__help/__folder/__remove`): 64 × `--l-play-h`, при
 /// наведении только светлеет, при нажатии — оттенок акцента.
-fn side_button(
+pub(crate) fn side_button(
     id: &'static str,
     classes: &'static str,
     label: String,

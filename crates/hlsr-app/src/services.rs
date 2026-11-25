@@ -108,6 +108,13 @@ pub fn start(
 ) -> Arc<ChannelRouter> {
     let version = env!("CARGO_PKG_VERSION");
     let demo = crate::demo::start(runtime, paths, platform, online);
+    // HLSR-CE: свои Source-моды.
+    let custom_mods = Arc::new(crate::custom_mods::CustomMods::new(
+        &paths.data_dir,
+        platform.delivery().clone(),
+        platform::app_shell(),
+        platform::app_dialogs(),
+    ));
     let channels: Vec<Arc<dyn ChannelService>> = vec![
         platform.delivery().clone(),
         platform.api().clone(),
@@ -118,6 +125,7 @@ pub fn start(
             paths.logs_dir.clone(),
             platform::app_shell(),
         )),
+        custom_mods.clone(),
     ];
     let mut sync = Map::new();
     sync.insert("app-version".into(), json!(version));
@@ -138,6 +146,7 @@ pub fn start(
     forward(runtime, platform.delivery().subscribe(), router.clone());
     forward(runtime, platform.api().subscribe(), router.clone());
     forward(runtime, demo.subscribe(), router.clone());
+    forward(runtime, custom_mods.subscribe(), router.clone());
     forward_update(runtime, update.subscribe(), router.clone());
     let mut online_events = online.api().subscribe();
     let events = router.clone();

@@ -193,6 +193,8 @@ struct State {
     active_tab: String,
     selected_game: String,
     selected_tool: String,
+    /// HLSR-CE: мод на вкладке `mods`.
+    selected_mod: String,
     rail_expanded: bool,
     rail_peek: bool,
     /// `configsGameId`: игра «Персонализации»; пусто — вкладку ещё не открывали.
@@ -237,6 +239,7 @@ impl NavController {
             active_tab: "games".into(),
             selected_game: hlsr_delivery::game_availability::DEFAULT_GAME_ID.into(),
             selected_tool: String::new(),
+            selected_mod: String::new(),
             rail_expanded: prefs.rail_expanded(),
             rail_peek: false,
             configs_game: String::new(),
@@ -341,6 +344,11 @@ impl NavController {
 
     pub fn selected_tool(&self) -> String {
         self.inner.state.borrow().selected_tool.clone()
+    }
+
+    /// HLSR-CE: мод на вкладке `mods`.
+    pub fn selected_mod(&self) -> String {
+        self.inner.state.borrow().selected_mod.clone()
     }
 
     /// Место выбранной игры в колонке.
@@ -467,6 +475,17 @@ impl NavController {
             let mut state = self.inner.state.borrow_mut();
             state.active_tab = "tools".into();
             state.selected_tool = id.to_owned();
+        }
+        self.publish();
+    }
+
+    /// HLSR-CE: свой мод в колонке — «Игры», вкладка мода (`mods`).
+    pub fn select_mod(&self, id: &str) {
+        self.set_section("games");
+        {
+            let mut state = self.inner.state.borrow_mut();
+            state.active_tab = "mods".into();
+            state.selected_mod = id.to_owned();
         }
         self.publish();
     }
