@@ -228,8 +228,19 @@ pub struct Background {
     fades: Rc<RefCell<HashMap<i32, f32>>>,
     radius: Pixels,
     activation: Option<Subscription>,
+    /// HLSR-CE: под какое окно (физические px) картинки игр уже прогреты и задача прогрева.
+    warmed: Option<(u32, u32)>,
+    warm_task: Option<Task<()>>,
     _changes: Task<()>,
 }
+
+/// HLSR-CE: игры с артом фона ([`hlsr_ui::game_art::GameArt`]; у 380/420 арт Half-Life 2).
+const WARM_GAMES: [&str; 3] = ["70", "218", "220"];
+/// Прогрев — после первого показанного фона и паузы: выбранная игра грузится первой.
+const WARM_DELAY: std::time::Duration = std::time::Duration::from_millis(800);
+/// Предел кеша картинок: арт всех игр под окно 2560 × 1440 (кадры и передний план) помещается
+/// целиком, переключение игр не разбирает картинки заново.
+const PICTURE_BUDGET: usize = 192 * 1024 * 1024;
 
 impl Background {
     pub fn new(services: &Services, cx: &mut Context<Background>) -> Background {
@@ -242,6 +253,9 @@ impl Background {
             let env = hlsr_ui::env::ManualEnv::new();
             Pictures::new(ImageLoader::new(Rc::new(NoRemote), &*env))
         });
+        // HLSR-CE: кеш с запасом под арт всех игр (прогрев — `Background::warm_up`).
+        let budget = hlsr_ui::images::DEFAULT_BUDGET_BYTES.max(PICTURE_BUDGET);
+        pictures.loader().set_budget(budget);
         let controller = BackgroundController::new(env.clone(), pictures.loader());
         let memory = MemoryGame::new(env.clone(), os_random());
         // Перемены логики приходят и изнутри её же вызовов из вида: перерисовка — через очередь.
@@ -284,6 +298,8 @@ impl Background {
             fades: Rc::default(),
             radius: px(WINDOW_RADIUS),
             activation: None,
+            warmed: None,
+            warm_task: None,
             _changes: changes,
         }
     }
@@ -495,6 +511,9 @@ impl Background {
                 self.pending = Some(selection);
             }
         }
+        if self.pending.is_none() {
+            self.warm_up((width, height), cx);
+        }
         let inputs = BackgroundInputs {
             paused: gate.top_layer > 0,
             focused: window.is_window_active(),
@@ -516,6 +535,35 @@ impl Background {
                 crate::motion::monitor_frame(window);
             }
         }
+    }
+
+    /// HLSR-CE: прогрев арта всех игр под окно `size` (после паузы, в фоновых потоках загрузчика):
+    /// без него картинка игры разбирается при первом выборе (WebP Ghosting — ~0,3 с), и фон
+    /// меняется с задержкой. Новый размер окна — прогрев заново (прежний отменяется).
+    fn warm_up(&mut self, size: (u32, u32), cx: &mut Context<Background>) {
+        if cfg!(test) || self.warmed == Some(size) {
+            return;
+        }
+        self.warmed = Some(size);
+        self.warm_task = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(WARM_DELAY).await;
+            this.update(cx, |this, _| {
+                let loader = this.pictures.loader();
+                let selections = WARM_GAMES.iter().flat_map(|game| {
+                    [Selection::of_game(game), Selection::of_episodes(game)]
+                        .into_iter()
+                        .flatten()
+                });
+                for selection in selections {
+                    for request in this.controller.requests(&selection) {
+                        if loader.cached(&request).is_none() {
+                            loader.request(request, |_| {});
+                        }
+                    }
+                }
+            })
+            .ok();
+        }));
     }
 
     /// Картинки выбора готовы к отрисовке (или не загрузились): кадр и передний план входят одним
